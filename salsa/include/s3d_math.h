@@ -9,6 +9,9 @@
 //-----------------------------------------------------------------------------
 #include <cstdint>
 #include <cmath>
+#include <cfloat>
+
+#include <immintrin.h>
 
 
 
@@ -32,7 +35,7 @@ struct Vector3
     __forceinline Vector3() noexcept
     { /* DO_NOTHING */ }
 
-    __forceinline Vector3(float nx, float ny, float nz) noexcept
+    __forceinline explicit Vector3(float nx, float ny, float nz) noexcept
     : x(nx), y(ny), z(nz)
     { /* DO_NOTHING */ }
 
@@ -41,6 +44,9 @@ struct Vector3
 
     __forceinline Vector3 operator - (const Vector3& value) const noexcept
     { return Vector3(x-value.x, y-value.y, z-value.z); }
+
+    __forceinline Vector3 operator * (const Vector3& value) const noexcept
+    { return Vector3(x*value.x, y*value.y, z*value.z); }
 
     __forceinline Vector3 operator - () const noexcept
     { return Vector3(-x, -y, -z); }
@@ -89,32 +95,152 @@ struct Vector3
     }
 };
 
+__forceinline float Max3(const Vector3& value)
+{ return s3d::Max( s3d::Max(value.x, value.y), value.z ); }
+
+__forceinline float Min3(const Vector3& value)
+{ return s3d::Min( s3d::Min(value.x, value.y), value.z ); }
+
+
 ///////////////////////////////////////////////////////////////////////////////
-// RayBase structure
-// ※レイトレ徒競走側と共通部分.
+// AABB structure
 ///////////////////////////////////////////////////////////////////////////////
-struct RayBase
+struct AABB
 {
-    Vector3 ray_pos;        //!< レイの原点.
-    Vector3 ray_dir;        //!< レイの方向ベクトル.
-    float   t_near;         //!< 交差判定用最小値.
-    float   t_far;          //!< 交差判定用最大値.
-    bool    intersect;      //!< 交差判定ありなら true.
-    Vector3 hit_pos;        //!< 交差した位置座標.
-    Vector3 normal;         //!< シェーディング用の法線.
-    int32_t face_id;        //!< 交差した面番号.
+    Vector3 mini;
+    Vector3 maxi;
+
+    __forceinline AABB() noexcept
+    { /* DO_NOTHING */ }
+
+    __forceinline explicit AABB(std::nullptr_t) noexcept
+    : mini( FLT_MAX,  FLT_MAX,  FLT_MAX)
+    , maxi(-FLT_MAX, -FLT_MAX, -FLT_MAX)
+    { /* DO_NOTHING */ }
+
+    __forceinline explicit AABB(const Vector3& _min, const Vector3& _max) noexcept
+    : mini(_min)
+    , maxi(_max)
+    { /* DO_NOTHING */ }
+
+    __forceinline explicit AABB(const float* _min, const float* _max) noexcept
+    : mini(_min[0], _min[1], _min[2])
+    , maxi(_max[0], _max[1], _max[2])
+    { /* DO_NOTHING */ }
+
+    __forceinline Vector3 GetCenter() const noexcept
+    { return (mini + maxi) * 0.5f; }
+
+    __forceinline void Merge(const AABB& value) noexcept
+    {
+        mini = Vector3::Min(mini, value.mini);
+        maxi = Vector3::Max(maxi, value.maxi);
+    }
+
+    __forceinline void Merge(const Vector3& value) noexcept
+    {
+        mini = Vector3::Min(mini, value);
+        maxi = Vector3::Max(maxi, value);
+    }
+
+    __forceinline const Vector3& operator[] (int index) const
+    { return *(&mini + index); }
+
+    __forceinline bool Slab(const Vector3& rayPos, const Vector3& invRayDir) const noexcept
+    {
+        const auto t0 = (mini - rayPos) * invRayDir;
+        const auto t1 = (maxi - rayPos) * invRayDir;
+        const auto tmin = Vector3::Min(t0, t1);
+        const auto tmax = Vector3::Max(t0, t1);
+        return Max3(tmin) <= Min3(tmax);
+    }
+
+    __forceinline void Clear() noexcept
+    {
+        mini.x = mini.y = mini.z =  FLT_MAX;
+        maxi.x = maxi.y = maxi.z = -FLT_MAX;
+    }
 };
 
-///////////////////////////////////////////////////////////////////////////////
-// Ray structure
-// ※個人利用のデータ.
-///////////////////////////////////////////////////////////////////////////////
-struct Ray : public RayBase
+__forceinline AABB MakeBox(const float* position, size_t count) noexcept 
 {
-    Vector3 inv_dir;        //!< レイの方向ベクトルの逆数.
+    if (count == 0 || position == nullptr)
+    { return AABB(nullptr); }
+
+    AABB result;
+
+    result.mini.x = result.maxi.x = position[0];
+    result.mini.y = result.maxi.y = position[1];
+    result.mini.z = result.maxi.z = position[2];
+
+    for(size_t i=1; i<count; ++i)
+    {
+        result.mini.x = s3d::Min(result.mini.x, position[i * 3 + 0]);
+        result.mini.y = s3d::Min(result.mini.y, position[i * 3 + 1]);
+        result.mini.z = s3d::Min(result.mini.z, position[i * 3 + 2]);
+
+        result.maxi.x = s3d::Max(result.maxi.x, position[i * 3 + 0]);
+        result.maxi.y = s3d::Max(result.maxi.y, position[i * 3 + 1]);
+        result.maxi.z = s3d::Max(result.maxi.z, position[i * 3 + 2]);
+    }
+
+    return result;
+}
+
+struct Triangle
+{
+    Vector3 p[3];
+    Vector3 n[3];
+    AABB    box;
+
+    __forceinline Triangle() noexcept
+    { /* DO_NOTHING */ }
+
+    inline Triangle
+    (
+        const float*    position,
+        const float*    normals,
+        const uint32_t* indices,
+        size_t          currentFace
+    ) noexcept
+    {
+        {
+            auto v0 = indices[currentFace + 0];
+            auto v1 = indices[currentFace + 2];
+            auto v2 = indices[currentFace + 4];
+
+            p[0].x = position[v0 + 0];
+            p[0].y = position[v0 + 1];
+            p[0].z = position[v0 + 2];
+
+            p[1].x = position[v1 + 0];
+            p[1].y = position[v1 + 1];
+            p[1].z = position[v1 + 2];
+
+            p[2].x = position[v2 + 0];
+            p[2].y = position[v2 + 1];
+            p[2].z = position[v2 + 2];
+        }
+
+        {
+            auto n0 = indices[currentFace + 1];
+            auto n1 = indices[currentFace + 3];
+            auto n2 = indices[currentFace + 5];
+
+            n[0].x = normals[n0 + 0];
+            n[0].y = normals[n0 + 1];
+            n[0].z = normals[n0 + 2];
+
+            n[1].x = normals[n1 + 0];
+            n[1].y = normals[n1 + 1];
+            n[1].z = normals[n1 + 2];
+
+            n[2].x = normals[n2 + 0];
+            n[2].y = normals[n2 + 1];
+            n[2].z = normals[n2 + 2];
+        }
+    }
 };
-
-
 
 
 } // namespace s3d
