@@ -13,64 +13,102 @@
 
 namespace s3d {
 
-struct Face
+///////////////////////////////////////////////////////////////////////////////
+// Node structure
+///////////////////////////////////////////////////////////////////////////////
+struct Node
 {
-    uint32_t idxP[3];
-    uint32_t idxN[3];
+    AABB        Box;    //!< バウンディングボックス.
+    uint32_t    L;      //!< 子ノード左. (末尾が0x1なら葉ノード). 
+    uint32_t    R;      //!< 子ノード右. (末尾が0x1なら葉ノード).
+
+    __forceinline Node() noexcept
+    : Box(nullptr)
+    , L  (kInvalid)
+    , R  (kInvalid)
+    { /* DO_NOTHING */ }
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-// Node2 structure
+// VertexIndex structure
 ///////////////////////////////////////////////////////////////////////////////
-struct Node2
+struct alignas(8) VertexIndex
 {
-    int     children[2];    // 葉ノードなら-1が入る.
-    AABB    box;            // 子供をまとめたAABB.
-    size_t  faceId;         // 葉ノードの場合の面番号.
+    uint32_t    P;     //!< 位置座標の番号.
+    uint32_t    N;     //!< 法線ベクトルの番号.
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-// BVH2 class
+// Ray structure
 ///////////////////////////////////////////////////////////////////////////////
-class BVH2
+struct Ray
 {
-    //=========================================================================
-    // list of friend classes and methods.
-    //=========================================================================
-    /* NOTHING */
-
-public:
-    //=========================================================================
-    // public variables.
-    //=========================================================================
-    /* NOTHING */
-
-    //=========================================================================
-    // public methods.
-    //=========================================================================
-    BVH2();
-    ~BVH2();
-
-    bool Build(
-        const float*    positions,
-        const float*    normals,
-        const uint32_t* indices,
-        size_t          faceCount);
-
-    bool Intersect() const;
-
-private:
-    //=========================================================================
-    // private variables.
-    //=========================================================================
-    std::vector<Node2>      m_Nodes;
-    std::vector<Triangle>   m_Triangles;
-
-    //=========================================================================
-    // private methods.
-    //=========================================================================
-    Node2 BuildNode();
+    Vector3f    pos;
+    Vector3f    dir;
+    Vector3f    inv_dir;
+    float       tmin;
+    float       tmax;
 };
 
+///////////////////////////////////////////////////////////////////////////////
+// HitRecord structure
+///////////////////////////////////////////////////////////////////////////////
+struct HitRecord
+{
+    bool        hit;        //!< 交差したら true.
+    float       dist;       //!< 距離.
+    float       u;          //!< 重心座標(yに適用).
+    float       v;          //!< 重心座標(zに適用).
+    int         face_id;    //!< 交差した面の番号.
+};
+
+///////////////////////////////////////////////////////////////////////////////
+// LBVH structure
+///////////////////////////////////////////////////////////////////////////////
+struct LBVH
+{
+    uint32_t                    Root            = kInvalid;
+    const Vector3f*             Positions       = nullptr;
+    const Vector3f*             Normals         = nullptr;
+    const VertexIndex*          Indices         = nullptr;
+    size_t                      PositionCount   = 0;
+    size_t                      NormalCount     = 0;
+    size_t                      IndexCount      = 0;
+    std::vector<Node>           Nodes;
+
+    void Build();
+    void Destruct();
+    void TraverseIterative(const Ray& ray, HitRecord& record) const;
+
+    __forceinline void IsHit(const Ray& ray, HitRecord& record, uint32_t face_id) const noexcept
+    {
+        const auto  id = face_id * 3;
+        const auto& p0 = Positions[Indices[id + 0].P];
+        const auto& p1 = Positions[Indices[id + 1].P];
+        const auto& p2 = Positions[Indices[id + 2].P];
+        if (s3d::IntersectTriangle(
+            ray.pos, ray.dir, p0, p1, p2, ray.tmin, ray.tmax, record.dist, record.u, record.v))
+        {
+            record.face_id = int32_t(face_id);
+            record.hit = true;
+        }
+    }
+
+    __forceinline Vector3f CalcPosition(uint32_t face_id, float u, float v, float w) const noexcept
+    {
+        const auto id = face_id * 3;
+        return Positions[Indices[id + 0].P] * w
+             + Positions[Indices[id + 1].P] * u
+             + Positions[Indices[id + 2].P] * v;
+    }
+
+    __forceinline Vector3f CalcNormal(uint32_t face_id, float u, float v, float w) const noexcept
+    {
+        const auto id = face_id * 3;
+        return Normals[Indices[id + 0].N] * w
+             + Normals[Indices[id + 1].N] * u
+             + Normals[Indices[id + 2].N] * v;
+    }
+};
 
 } // namespace s3d

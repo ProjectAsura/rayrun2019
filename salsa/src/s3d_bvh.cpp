@@ -8,90 +8,207 @@
 // Includes
 //-----------------------------------------------------------------------------
 #include <s3d_bvh.h>
+#include <chrono>
+#include <execution>
+#include <cassert>
+#include <ppl.h>
+#include <iostream>
+
+
+//-----------------------------------------------------------------------------
+// Using Statements
+//-----------------------------------------------------------------------------
+using namespace concurrency;
+
+
+namespace {
+
+// delta function in sec3 of the paper
+// "Fast and Simple Agglomerative LBVH Construction"
+__forceinline uint32_t Delta(const std::vector<s3d::Vector2u> &leaves, const uint32_t id)
+{ return leaves[id + 1].y ^ leaves[id].y; }
+
+} // namespace
 
 
 namespace s3d {
 
-BVH2::BVH2()
-{ /* DO_NOTHING */ }
+///////////////////////////////////////////////////////////////////////////////
+// LBVH structure
+///////////////////////////////////////////////////////////////////////////////
 
-BVH2::~BVH2()
-{ /* DO_NOTHING */ }
-
-bool BVH2::Build
-(
-    const float*    positions,
-    const float*    normals,
-    const uint32_t* indices,
-    size_t          faceCount
-)
+//-----------------------------------------------------------------------------
+//      構築処理を行います.
+//-----------------------------------------------------------------------------
+void LBVH::Build()
 {
-    if (positions == nullptr || normals == nullptr || indices == nullptr || faceCount == 0)
-    { return false; }
+    AABB box(nullptr);
 
-    // 三角形リスト構築.
+    // 全体のバウンディングボックスを求める.
+    for(auto i=0; i<PositionCount; ++i)
+    { box.Merge(Positions[i]); }
+
+    // ポリゴン数.
+    const auto T = uint32_t(IndexCount / 3);
+
+    // allocate pair <reference, morton code>
+    std::vector<Vector2u> leaves;
+    leaves.resize(T);
+
+    // モートンコードを設定.
+    parallel_for<uint32_t>(0, T, [&](uint32_t i)
     {
-        m_Triangles.resize(faceCount);
-        for(size_t i=0, idx=0; i<faceCount; i++, idx+=6)
+        const auto id = i * 3;
+        const auto centroid = (Positions[Indices[id + 0].P] + Positions[Indices[id + 1].P] + Positions[Indices[id + 2].P]) / 3.0f;
+        const auto unitcube = box.Normalize(centroid);
+        leaves[i].x = i;
+        leaves[i].y = Morton3D(unitcube.x, unitcube.y, unitcube.z);
+    });
+
+    // 降順でモートンコードをソートする.
+    std::sort(std::execution::par, std::begin(leaves), std::end(leaves), [&](const Vector2u& lhs, const Vector2u& rhs)
+    {
+        return (lhs.y < rhs.y);
+    });
+
+    // ノードの数.
+    const auto N = T - 1;
+    Nodes.resize(N);
+
+    // otherBounds in algorithm 1 of the paper
+    // "Massively Parallel Construction of Radix Tree Forests for the Efficient Sampling of Discrete Probability Distributions"
+    // https://arxiv.org/pdf/1901.05423.pdf
+    std::vector<std::atomic<uint32_t>> other_bounds(N);
+    parallel_for<size_t>(0, N, [&](size_t i)
+    {
+        other_bounds[i].store(kInvalid);
+    });
+
+    parallel_for<uint32_t>(0, T, [&](uint32_t i)
+    {
+        // 現在のリーフ/ノードID.
+        auto current = i;
+
+        // 範囲.
+        auto L = current;
+        auto R = current;
+
+        // 葉ノードのAABB
+        const auto id = leaves[i].x * 3;
+        AABB aabb (Positions[Indices[id + 0].P]);
+        aabb.Merge(Positions[Indices[id + 1].P]);
+        aabb.Merge(Positions[Indices[id + 2].P]);
+        aabb.mini -= box.mini;
+        aabb.maxi -= box.mini;
+
+        // リーフまたはノードか?.
+        auto is_leaf = true;
+        while(1)
         {
-            // 位置座標設定.
+            // 全体の範囲がカバーされたら, おしまい.
+            if (0 == L && R == N)
             {
-                auto v0 = indices[idx + 0];
-                auto v1 = indices[idx + 2];
-                auto v2 = indices[idx + 4];
-
-                m_Triangles[i].p[0].x = positions[v0 + 0];
-                m_Triangles[i].p[0].y = positions[v0 + 1];
-                m_Triangles[i].p[0].z = positions[v0 + 2];
-
-                m_Triangles[i].p[1].x = positions[v1 + 0];
-                m_Triangles[i].p[1].y = positions[v1 + 1];
-                m_Triangles[i].p[1].z = positions[v1 + 2];
-
-                m_Triangles[i].p[2].x = positions[v2 + 0];
-                m_Triangles[i].p[2].y = positions[v2 + 1];
-                m_Triangles[i].p[2].z = positions[v2 + 2];
+                Root = current;
+                break;
             }
 
-            // 法線ベクトル設定.
+            // リーフ/ノード番号.
+            // 下位1ビットはリーフノード判定ビットとして利用するため, 1bitシフト.
+            const auto index = (is_leaf) ? (leaves[current].x << 1) + 1 : current << 1;
+
+            uint32_t previous, parent;
+            if (0 == L || (R != N && Delta(leaves, R) < Delta(leaves, L - 1)) )
             {
-                auto n0 = indices[idx + 1];
-                auto n1 = indices[idx + 3];
-                auto n2 = indices[idx + 5];
-
-                m_Triangles[i].n[0].x = normals[n0 + 0];
-                m_Triangles[i].n[0].y = normals[n0 + 1];
-                m_Triangles[i].n[0].z = normals[n0 + 2];
-
-                m_Triangles[i].n[1].x = normals[n1 + 0];
-                m_Triangles[i].n[1].y = normals[n1 + 1];
-                m_Triangles[i].n[1].z = normals[n1 + 2];
-
-                m_Triangles[i].n[2].x = normals[n2 + 0];
-                m_Triangles[i].n[2].y = normals[n2 + 1];
-                m_Triangles[i].n[2].z = normals[n2 + 2];
+                // 右が親で，"左"は変化しない.
+                parent = R;
+                previous = other_bounds[parent].exchange(L);
+                if (kInvalid != previous)
+                { R = previous; }
+                Nodes[parent].L = index;
+            }
+            else
+            {
+                // 親が左で，"右"は変換しない.
+                parent = L - 1;
+                previous = other_bounds[parent].exchange(R);
+                if (kInvalid != previous)
+                { L = previous; }
+                Nodes[parent].R = index;
             }
 
-            // AABB設定.
-            m_Triangles[i].box.maxi = m_Triangles[i].box.mini = m_Triangles[i].p[0];
-            m_Triangles[i].box.Merge(m_Triangles[i].p[1]);
-            m_Triangles[i].box.Merge(m_Triangles[i].p[2]);
+            // マージする.
+            Nodes[parent].Box.Merge(aabb);
+
+            // このスレッドを終了する.
+            if (kInvalid == previous)
+            { break; }
+
+            current = parent;
+            aabb    = Nodes[current].Box;
+            is_leaf = false;
         }
-    }
+    });
 
-    /* TODO : 高速化のために再帰を使わない */
-
-    return false;
+    // ずらした分を戻す.
+    parallel_for<size_t>(0, N, [&](size_t i)
+    {
+        Nodes[i].Box.mini += box.mini;
+        Nodes[i].Box.maxi += box.mini;
+    });
 }
 
-Node2 BVH2::BuildNode()
+//-----------------------------------------------------------------------------
+//      データを破棄します.
+//-----------------------------------------------------------------------------
+void LBVH::Destruct()
 {
-    Node2 result;
+    Nodes.clear();
+    Nodes.shrink_to_fit();
 
+    PositionCount = 0;
+    Positions = nullptr;
 
-    return result;
+    NormalCount = 0;
+    Normals = nullptr;
+
+    IndexCount = 0;
+    Indices = nullptr;
 }
 
+//-----------------------------------------------------------------------------
+//      ノードを巡回し交差判定を取ります.
+//-----------------------------------------------------------------------------
+void LBVH::TraverseIterative(const Ray& ray, HitRecord& record) const
+{
+    uint32_t visit_stack[64];
+    uint32_t stack_ptr = 1;
 
+    // ルートノードだけpush
+    visit_stack[0] = Root;
+
+    // スタックが空になるまで処理.
+    while(stack_ptr > 0)
+    {
+        --stack_ptr; // pop.
+        const auto  idx  = visit_stack[stack_ptr];
+        const auto& node = Nodes[idx];
+
+        if (!node.Box.Intersect(ray.pos, ray.inv_dir, record.dist))
+        { continue; }
+
+        const auto idxL = node.L >> 1;
+        const auto idxR = node.R >> 1;
+
+        if (node.L & 0x1)
+            IsHit(ray, record, idxL);
+        else
+            visit_stack[stack_ptr++] = idxL; // push.
+
+        if (node.R & 0x1)
+            IsHit(ray, record, idxR);
+        else
+            visit_stack[stack_ptr++] = idxR; // push.
+    }
+}
 
 } // namespace s3d

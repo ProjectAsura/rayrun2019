@@ -9,97 +9,333 @@
 //-----------------------------------------------------------------------------
 #include <cstdint>
 #include <cmath>
-#include <cfloat>
+#include <limits>
 
 #include <immintrin.h>
+
+#ifdef _MSC_VER
+#include <intrin.h> // for __lzcnt
+#endif
 
 
 
 namespace s3d {
 
-__forceinline float Min(float lhs, float rhs) noexcept
+constexpr float     kMaxBound = std::numeric_limits<float>::max();
+constexpr float     kMinBound = std::numeric_limits<float>::lowest();
+constexpr uint32_t  kInvalid  = std::numeric_limits<uint32_t>::max();
+
+template<typename T>
+__forceinline T Min(T lhs, T rhs) noexcept
 { return (lhs < rhs) ? lhs : rhs; }
 
-__forceinline float Max(float lhs, float rhs) noexcept
+template<typename T>
+__forceinline T Max(T lhs, T rhs) noexcept
 { return (lhs > rhs) ? lhs : rhs; }
+
+template<typename T>
+__forceinline T Clamp(T value, T mini, T maxi) noexcept
+{ return Max( mini, Min( maxi, value ) ); }
+
+template<typename T>
+__forceinline T Lerp(T a, T b, T t) noexcept
+{ return (b - a) * t + a; }
+
+__forceinline uint32_t ExpandBits(uint32_t v) noexcept
+{
+    v = (v * 0x00010001u) & 0xFF0000FFu;
+    v = (v * 0x00000101u) & 0x0F00F00Fu;
+    v = (v * 0x00000011u) & 0xC30C30C3u;
+    v = (v * 0x00000005u) & 0x49249249u;
+    return v;
+}
+
+__forceinline uint64_t ExpandBits(uint64_t v) noexcept
+{
+    v = (v * 0x000100000001u) & 0xFFFF00000000FFFFu;
+    v = (v * 0x000000010001u) & 0x00FF0000FF0000FFu;
+    v = (v * 0x000000000101u) & 0xF00F00F00F00F00Fu;
+    v = (v * 0x000000000011u) & 0x30C30C30C30C30C3u;
+    v = (v * 0x000000000005u) & 0x9249249249249249u;
+
+    return v;
+}
+
+__forceinline uint32_t Morton3D(float x, float y, float z) noexcept
+{
+    x = s3d::Clamp(x * 1024.0f, 0.0f, 1023.0f);
+    y = s3d::Clamp(y * 1024.0f, 0.0f, 1023.0f);
+    z = s3d::Clamp(z * 1024.0f, 0.0f, 1023.0f);
+    uint32_t xx = ExpandBits((uint32_t)x);
+    uint32_t yy = ExpandBits((uint32_t)y);
+    uint32_t zz = ExpandBits((uint32_t)z);
+    return xx * 4 + yy * 2 + zz;
+}
+
+__forceinline uint64_t Morton3D_64(float x, float y, float z) noexcept
+{
+    double dx = s3d::Clamp(x * 1048576.0, 0.0, 1048575.0);
+    double dy = s3d::Clamp(y * 1048576.0, 0.0, 1048575.0);
+    double dz = s3d::Clamp(z * 1048576.0, 0.0, 1048575.0);
+    uint64_t xx = ExpandBits((uint64_t)dx);
+    uint64_t yy = ExpandBits((uint64_t)dy);
+    uint64_t zz = ExpandBits((uint64_t)dz);
+    return xx * 4 + yy * 2 + zz;
+}
+
+// count leading zero
+__forceinline uint32_t Clz(uint32_t value)
+{
+#if defined(_MSC_VER)
+    return __lzcnt(value);
+#elif defined(__GNUC__)
+    return __builtin_clz(value);
+#else
+    uint32_t n = 0;
+    if ((value & 0xFFFF0000) == 0) {n  = 16; value <<= 16;}
+    if ((value & 0xFF000000) == 0) {n +=  8; value <<=  8;}
+    if ((value & 0xF0000000) == 0) {n +=  4; value <<=  4;}
+    if ((value & 0xC0000000) == 0) {n +=  2; value <<=  2;}
+    if ((value & 0x80000000) == 0) {n +=  1;}
+    return n;
+#endif
+}
+
+
+///////////////////////////////////////////////////////////////////////////////
+// Vector2 structure
+///////////////////////////////////////////////////////////////////////////////
+template<typename T>
+struct Vector2
+{
+    T x;
+    T y;
+ 
+    __forceinline Vector2() noexcept
+    { /* DO_NOTHING */ }
+
+    __forceinline explicit Vector2(T nx, T ny) noexcept
+    : x(nx), y(ny)
+    { /* DO_NOTHING */ }
+
+    __forceinline Vector2<T> operator + (const Vector2<T>& value) const noexcept
+    { return Vector2<T>(x+value.x, y+value.y); }
+
+    __forceinline Vector2<T> operator - (const Vector2<T>& value) const noexcept
+    { return Vector2<T>(x-value.x, y-value.y); }
+
+    __forceinline Vector2<T> operator / (const Vector2<T>& value) const noexcept
+    { return Vector2<T>(x/value.x, y/value.y); }
+
+    __forceinline Vector2<T> operator * (const Vector2<T>& value) const noexcept
+    { return Vector2<T>(x*value.x, y*value.y); }
+
+    __forceinline Vector2<T> operator - () const noexcept
+    { return Vector2<T>(-x, -y); }
+
+    __forceinline Vector2<T> operator * (T value) const noexcept
+    { return Vector2<T>(x*value, y*value); }
+
+    __forceinline Vector2<T>& operator += (const Vector2<T>& value) noexcept
+    {
+        x += value.x;
+        y += value.y;
+        return *this;
+    }
+
+    __forceinline Vector2<T>& operator -= (const Vector2<T>& value) noexcept
+    {
+        x -= value.x;
+        y -= value.y;
+        return *this;
+    }
+
+    __forceinline Vector2<T>& operator *= (T value) noexcept
+    {
+        x *= value;
+        y *= value;
+        return *this;
+    }
+
+    __forceinline Vector2<T>& operator /= (T value) noexcept
+    {
+        x /= value;
+        y /= value;
+        return *this;
+    }
+
+    __forceinline const T& operator[] (int index) const noexcept
+    { return *(&x + index); }
+
+    __forceinline static T Dot(const Vector2<T>& lhs, const Vector2<T>& rhs) noexcept
+    { return lhs.x*rhs.x + lhs.y*rhs.y; }
+
+    __forceinline static T Length(const Vector2<T>& value) noexcept
+    { return sqrt(Dot(value, value)); }
+
+    __forceinline static Vector2<T> Normalize(const Vector2<T>& value) noexcept
+    {
+        const auto mag = Dot(value, value);
+        const auto inv = (mag > 0.0) ? 1.0/sqrt(mag) : 1.0;
+        return Vector2<T>(value.x*inv, value.y*inv);
+    }
+
+    __forceinline static Vector2<T> Min(const Vector2<T>& lhs, const Vector2<T>& rhs) noexcept
+    {
+        return Vector2<T>(
+            s3d::Min(lhs.x, rhs.x),
+            s3d::Min(lhs.y, rhs.y));
+    }
+
+    __forceinline static Vector2<T> Max(const Vector2<T>& lhs, const Vector2<T>& rhs) noexcept
+    {
+        return Vector2<T>(
+            s3d::Max(lhs.x, rhs.x),
+            s3d::Max(lhs.y, rhs.y));
+    }
+};
+
 
 ///////////////////////////////////////////////////////////////////////////////
 // Vector3 structure
 ///////////////////////////////////////////////////////////////////////////////
+template<typename T>
 struct Vector3
 {
-    float x;
-    float y;
-    float z;
+    T x;
+    T y;
+    T z;
  
     __forceinline Vector3() noexcept
     { /* DO_NOTHING */ }
 
-    __forceinline explicit Vector3(float nx, float ny, float nz) noexcept
+    __forceinline explicit Vector3(T nx, T ny, T nz) noexcept
     : x(nx), y(ny), z(nz)
     { /* DO_NOTHING */ }
 
-    __forceinline Vector3 operator + (const Vector3& value) const noexcept
-    { return Vector3(x+value.x, y+value.y, z+value.z); }
+    __forceinline Vector3<T> operator + (const Vector3<T>& value) const noexcept
+    { return Vector3<T>(x+value.x, y+value.y, z+value.z); }
 
-    __forceinline Vector3 operator - (const Vector3& value) const noexcept
-    { return Vector3(x-value.x, y-value.y, z-value.z); }
+    __forceinline Vector3<T> operator - (const Vector3<T>& value) const noexcept
+    { return Vector3<T>(x-value.x, y-value.y, z-value.z); }
 
-    __forceinline Vector3 operator * (const Vector3& value) const noexcept
-    { return Vector3(x*value.x, y*value.y, z*value.z); }
+    __forceinline Vector3<T> operator / (const Vector3<T>& value) const noexcept
+    { return Vector3<T>(x/value.x, y/value.y, z/value.z); }
 
-    __forceinline Vector3 operator - () const noexcept
-    { return Vector3(-x, -y, -z); }
+    __forceinline Vector3<T> operator * (const Vector3<T>& value) const noexcept
+    { return Vector3<T>(x*value.x, y*value.y, z*value.z); }
 
-    __forceinline Vector3 operator * (float value) const noexcept
-    { return Vector3(x*value, y*value, z*value); }
+    __forceinline Vector3<T> operator - () const noexcept
+    { return Vector3<T>(-x, -y, -z); }
 
-    __forceinline const float& operator[] (int index) const noexcept
+    __forceinline Vector3<T> operator * (T value) const noexcept
+    { return Vector3<T>(x*value, y*value, z*value); }
+
+    __forceinline Vector3<T> operator / (T value) const noexcept
+    { return Vector3<T>(x/value, y/value, z/value); }
+
+    __forceinline Vector3<T>& operator += (const Vector3<T>& value) noexcept
+    {
+        x += value.x;
+        y += value.y;
+        z += value.z;
+        return *this;
+    }
+
+    __forceinline Vector3<T>& operator -= (const Vector3<T>& value) noexcept
+    {
+        x -= value.x;
+        y -= value.y;
+        z -= value.z;
+        return *this;
+    }
+
+    __forceinline Vector3<T>& operator *= (T value) noexcept
+    {
+        x *= value;
+        y *= value;
+        z *= value;
+        return *this;
+    }
+
+    __forceinline Vector3<T>& operator /= (T value) noexcept
+    {
+        x /= value;
+        y /= value;
+        z /= value;
+        return *this;
+    }
+
+    __forceinline const T& operator[] (int index) const noexcept
     { return *(&x + index); }
 
-    __forceinline static float Dot(const Vector3& lhs, const Vector3& rhs) noexcept
+    __forceinline static T Dot(const Vector3<T>& lhs, const Vector3<T>& rhs) noexcept
     { return lhs.x*rhs.x + lhs.y*rhs.y + lhs.z*rhs.z; }
 
-    __forceinline static float Length(const Vector3& value) noexcept
+    __forceinline static T Length(const Vector3<T>& value) noexcept
     { return sqrt(Dot(value, value)); }
 
-    __forceinline static Vector3 Cross(const Vector3& lhs, const Vector3& rhs) noexcept
+    __forceinline static Vector3<T> Cross(const Vector3<T>& lhs, const Vector3<T>& rhs) noexcept
     {
-        return Vector3(
+        return Vector3<T>(
             (lhs.y*rhs.z) - (lhs.z*rhs.y),
             (lhs.z*rhs.x) - (lhs.x*rhs.z),
             (lhs.x*rhs.y) - (lhs.y*rhs.x));
     }
 
-    __forceinline static Vector3 Normalize(const Vector3& value) noexcept
+    __forceinline static Vector3<T> Normalize(const Vector3<T>& value) noexcept
     {
         const auto mag = Dot(value, value);
-        const auto inv = (mag > 0.0f) ? 1.0f/sqrt(mag) : 1.0f;
-        return Vector3(value.x*inv, value.y*inv, value.z*inv);
+        const auto inv = (mag > T(0.0)) ? T(1.0/sqrt(mag)) : T(1.0);
+        return Vector3<T>(value.x*inv, value.y*inv, value.z*inv);
     }
 
-    __forceinline static Vector3 Min(const Vector3& lhs, const Vector3& rhs) noexcept
+    __forceinline static Vector3<T> Min(const Vector3<T>& lhs, const Vector3<T>& rhs) noexcept
     {
-        return Vector3(
+        return Vector3<T>(
             s3d::Min(lhs.x, rhs.x),
             s3d::Min(lhs.y, rhs.y),
             s3d::Min(lhs.z, rhs.z));
     }
 
-    __forceinline static Vector3 Max(const Vector3& lhs, const Vector3& rhs) noexcept
+    __forceinline static Vector3<T> Max(const Vector3<T>& lhs, const Vector3<T>& rhs) noexcept
     {
-        return Vector3(
+        return Vector3<T>(
             s3d::Max(lhs.x, rhs.x),
             s3d::Max(lhs.y, rhs.y),
             s3d::Max(lhs.z, rhs.z));
     }
 };
 
-__forceinline float Max3(const Vector3& value)
+template<typename T>
+__forceinline T Max2(const Vector2<T>& value)
+{ return s3d::Max(value.x, value.y); }
+
+template<typename T>
+__forceinline T Min2(const Vector2<T>& value)
+{ return s3d::Min(value.x, value.y); }
+
+template<typename T>
+__forceinline T Max3(const Vector3<T>& value)
 { return s3d::Max( s3d::Max(value.x, value.y), value.z ); }
 
-__forceinline float Min3(const Vector3& value)
+template<typename T>
+__forceinline T Min3(const Vector3<T>& value)
 { return s3d::Min( s3d::Min(value.x, value.y), value.z ); }
+
+using Vector2i  = Vector2<int>;
+using Vector2u  = Vector2<uint32_t>;
+using Vector2li = Vector2<int64_t>;
+using Vector2lu = Vector2<uint64_t>;
+using Vector2f  = Vector2<float>;
+using Vector2d  = Vector2<double>;
+
+using Vector3i  = Vector3<int>;
+using Vector3u  = Vector3<uint32_t>;
+using Vector3li = Vector3<int64_t>;
+using Vector3lu = Vector3<uint64_t>;
+using Vector3f  = Vector3<float>;
+using Vector3d  = Vector3<double>;
 
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -107,20 +343,25 @@ __forceinline float Min3(const Vector3& value)
 ///////////////////////////////////////////////////////////////////////////////
 struct AABB
 {
-    Vector3 mini;
-    Vector3 maxi;
+    Vector3f mini;
+    Vector3f maxi;
 
     __forceinline AABB() noexcept
     { /* DO_NOTHING */ }
 
     __forceinline explicit AABB(std::nullptr_t) noexcept
-    : mini( FLT_MAX,  FLT_MAX,  FLT_MAX)
-    , maxi(-FLT_MAX, -FLT_MAX, -FLT_MAX)
+    : mini(kMaxBound, kMaxBound, kMaxBound)
+    , maxi(kMinBound, kMinBound, kMinBound)
     { /* DO_NOTHING */ }
 
-    __forceinline explicit AABB(const Vector3& _min, const Vector3& _max) noexcept
+    __forceinline explicit AABB(const Vector3f& _min, const Vector3f& _max) noexcept
     : mini(_min)
     , maxi(_max)
+    { /* DO_NOTHING */ }
+
+    __forceinline explicit AABB(const Vector3f& value) noexcept
+    : mini(value)
+    , maxi(value)
     { /* DO_NOTHING */ }
 
     __forceinline explicit AABB(const float* _min, const float* _max) noexcept
@@ -128,37 +369,62 @@ struct AABB
     , maxi(_max[0], _max[1], _max[2])
     { /* DO_NOTHING */ }
 
-    __forceinline Vector3 GetCenter() const noexcept
+    __forceinline AABB(const AABB& value) noexcept
+    : mini(value.mini)
+    , maxi(value.maxi)
+    { /* DO_NOTHING */ }
+
+    __forceinline Vector3f GetCenter() const noexcept
     { return (mini + maxi) * 0.5f; }
 
     __forceinline void Merge(const AABB& value) noexcept
     {
-        mini = Vector3::Min(mini, value.mini);
-        maxi = Vector3::Max(maxi, value.maxi);
+        mini = Vector3f::Min(mini, value.mini);
+        maxi = Vector3f::Max(maxi, value.maxi);
     }
 
-    __forceinline void Merge(const Vector3& value) noexcept
+    __forceinline void Merge(const Vector3f& value) noexcept
     {
-        mini = Vector3::Min(mini, value);
-        maxi = Vector3::Max(maxi, value);
+        mini = Vector3f::Min(mini, value);
+        maxi = Vector3f::Max(maxi, value);
     }
 
-    __forceinline const Vector3& operator[] (int index) const
+    __forceinline Vector3f Normalize(const Vector3f& p) const noexcept
+    { return (p - mini) / (maxi - mini); }
+
+    __forceinline const Vector3f& operator[] (int index) const
     { return *(&mini + index); }
 
-    __forceinline bool Slab(const Vector3& rayPos, const Vector3& invRayDir) const noexcept
+    __forceinline bool Slab(const Vector3f& rayPos, const Vector3f& invRayDir) const noexcept
     {
         const auto t0 = (mini - rayPos) * invRayDir;
         const auto t1 = (maxi - rayPos) * invRayDir;
-        const auto tmin = Vector3::Min(t0, t1);
-        const auto tmax = Vector3::Max(t0, t1);
+        const auto tmin = Vector3f::Min(t0, t1);
+        const auto tmax = Vector3f::Max(t0, t1);
         return Max3(tmin) <= Min3(tmax);
+    }
+
+    __forceinline bool Intersect(const Vector3f& rayPos, const Vector3f& invRayDir, const float length) const noexcept
+    {
+        Vector3f v;
+        v.x = ((0 < invRayDir.x ? mini.x : maxi.x) - rayPos.x) * invRayDir.x;
+        v.y = ((0 < invRayDir.y ? mini.y : maxi.y) - rayPos.y) * invRayDir.y;
+        v.z = ((0 < invRayDir.z ? mini.z : maxi.z) - rayPos.z) * invRayDir.z;
+
+        const auto tmin = Max3(v);
+
+        v.x = ((0 < invRayDir.x ? maxi.x : mini.x) - rayPos.x) * invRayDir.x;
+        v.y = ((0 < invRayDir.y ? maxi.y : mini.y) - rayPos.y) * invRayDir.y;
+        v.z = ((0 < invRayDir.z ? maxi.z : mini.z) - rayPos.z) * invRayDir.z;
+
+        const auto tmax = Min3(v);
+        return (tmin <= tmax) && (0.0f < tmax) && (tmin < length);
     }
 
     __forceinline void Clear() noexcept
     {
-        mini.x = mini.y = mini.z =  FLT_MAX;
-        maxi.x = maxi.y = maxi.z = -FLT_MAX;
+        mini.x = mini.y = mini.z = kMaxBound;
+        maxi.x = maxi.y = maxi.z = kMinBound;
     }
 };
 
@@ -187,60 +453,47 @@ __forceinline AABB MakeBox(const float* position, size_t count) noexcept
     return result;
 }
 
-struct Triangle
+__forceinline bool IntersectTriangle
+(
+    const Vector3f& rayPos,
+    const Vector3f& rayDir,
+    const Vector3f& v0,
+    const Vector3f& v1,
+    const Vector3f& v2,
+    const float     tmin,
+    const float     tmax,
+    float&          dist,
+    float&          u,
+    float&          v
+)
 {
-    Vector3 p[3];
-    Vector3 n[3];
-    AABB    box;
+    auto e1  = v1 - v0;
+    auto e2  = v2 - v0;
+    auto P   = Vector3f::Cross(rayDir, e2);
+    auto det = Vector3f::Dot(e1, P);
+    if (det == 0.0f)
+    { return false; }
 
-    __forceinline Triangle() noexcept
-    { /* DO_NOTHING */ }
+    auto inv_det = 1.0f / det;
+    auto T  = rayPos - v0;
+    auto fu = Vector3f::Dot(T, P) * inv_det;
+    if (fu < 0.0f || fu > 1.0f)
+    { return false; }
 
-    inline Triangle
-    (
-        const float*    position,
-        const float*    normals,
-        const uint32_t* indices,
-        size_t          currentFace
-    ) noexcept
-    {
-        {
-            auto v0 = indices[currentFace + 0];
-            auto v1 = indices[currentFace + 2];
-            auto v2 = indices[currentFace + 4];
+    auto Q  = Vector3f::Cross(T, e1);
+    auto fv = Vector3f::Dot(rayDir, Q) * inv_det;
+    if (fv < 0.0f || (fu + fv) > 1.0f)
+    { return false; }
 
-            p[0].x = position[v0 + 0];
-            p[0].y = position[v0 + 1];
-            p[0].z = position[v0 + 2];
+    auto t = Vector3f::Dot(e2, Q) * inv_det;
+    if (t < tmin || tmax <= t || t > dist)
+    { return false; }
 
-            p[1].x = position[v1 + 0];
-            p[1].y = position[v1 + 1];
-            p[1].z = position[v1 + 2];
-
-            p[2].x = position[v2 + 0];
-            p[2].y = position[v2 + 1];
-            p[2].z = position[v2 + 2];
-        }
-
-        {
-            auto n0 = indices[currentFace + 1];
-            auto n1 = indices[currentFace + 3];
-            auto n2 = indices[currentFace + 5];
-
-            n[0].x = normals[n0 + 0];
-            n[0].y = normals[n0 + 1];
-            n[0].z = normals[n0 + 2];
-
-            n[1].x = normals[n1 + 0];
-            n[1].y = normals[n1 + 1];
-            n[1].z = normals[n1 + 2];
-
-            n[2].x = normals[n2 + 0];
-            n[2].y = normals[n2 + 1];
-            n[2].z = normals[n2 + 2];
-        }
-    }
-};
+    dist = t;
+    u    = fu;
+    v    = fv;
+    return true;
+}
 
 
 } // namespace s3d
