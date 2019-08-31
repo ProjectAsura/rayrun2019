@@ -29,6 +29,12 @@ BOOL APIENTRY DllMain(HMODULE hModule,
 }
 
 //
+bool neverUseOpenMP()
+{
+    return false;
+}
+
+//
 class Vec3
 {
 public:
@@ -437,6 +443,10 @@ private:
         int32_t numTriangle,
         int32_t depth)
     {
+        if (numTriangle == 0)
+        {
+            return;
+        }
         // このノードのAABBを求める
         auto& curNode = nodes_[nodeIndex];
         curNode.childlen[0] = -1;
