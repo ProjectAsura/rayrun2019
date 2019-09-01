@@ -64,10 +64,10 @@ void LBVH::Build()
         leaves[i].y = Morton3D(unitcube.x, unitcube.y, unitcube.z);
     });
 
-    // 降順でモートンコードをソートする.
-    std::sort(std::execution::par, std::begin(leaves), std::end(leaves), [&](const Vector2u& lhs, const Vector2u& rhs)
+    // モートンコードでソートする.
+    parallel_radixsort(leaves.begin(), leaves.end(), [&](const Vector2u& val)
     {
-        return (lhs.y < rhs.y);
+        return val.y;
     });
 
     // ノードの数.

@@ -3,6 +3,7 @@
 // Desc : Math Library.
 // Copyright(c) Project Asura. All right reserved.
 //-----------------------------------------------------------------------------
+#pragma once
 
 //-----------------------------------------------------------------------------
 // Includes
@@ -17,6 +18,14 @@ namespace s3d {
 constexpr float     kMaxBound = std::numeric_limits<float>::max();
 constexpr float     kMinBound = std::numeric_limits<float>::lowest();
 constexpr uint32_t  kInvalid  = std::numeric_limits<uint32_t>::max();
+
+constexpr float   F_PI        = 3.1415926535897932384626433832795f;     //!< πです.
+constexpr float   F_2PI       = 6.283185307179586476925286766559f;      //!< 2πです.
+constexpr float   F_1DIVPI    = 0.31830988618379067153776752674503f;    //!< 1/πです.
+constexpr float   F_1DIV2PI   = 0.15915494309189533576888376337251f;    //!< 1/2πです.
+constexpr float   F_PIDIV2    = 1.5707963267948966192313216916398f;     //!< π/2です.
+constexpr float   F_PIDIV3    = 1.0471975511965977461542144610932f;     //!< π/3です.
+constexpr float   F_PIDIV4    = 0.78539816339744830961566084581988f;    //!< π/4です.
 
 template<typename T> struct Vector2;
 template<typename T> struct Vector3;
@@ -38,6 +47,13 @@ __forceinline T Clamp(T value, T mini, T maxi) noexcept
 template<typename T>
 __forceinline T Lerp(T a, T b, T t) noexcept
 { return (b - a) * t + a; }
+
+__forceinline bool IsZero(float value) noexcept
+{ return ( fabs( value ) <= FLT_EPSILON ); }
+
+__forceinline float SafeSqrt(float value) noexcept
+{ return (value > FLT_EPSILON) ? sqrt(value) : 0.0f; }
+
 
 __forceinline uint32_t ExpandBits(uint32_t v) noexcept
 {
@@ -145,11 +161,18 @@ struct Vector2
     __forceinline const T& operator[] (int index) const noexcept
     { return *(&x + index); }
 
+    __forceinline T Length() const noexcept
+    { return sqrt(Dot(*this, *this)); }
+
+    __forceinline T LengthSq() const noexcept
+    { return Dot(*this, *this); }
+
     __forceinline static T Dot(const Vector2<T>& lhs, const Vector2<T>& rhs) noexcept
     { return lhs.x*rhs.x + lhs.y*rhs.y; }
 
     __forceinline static T Length(const Vector2<T>& value) noexcept
     { return sqrt(Dot(value, value)); }
+
 
     __forceinline static Vector2<T> Normalize(const Vector2<T>& value) noexcept
     {
@@ -247,6 +270,12 @@ struct Vector3
 
     __forceinline const T& operator[] (int index) const noexcept
     { return *(&x + index); }
+
+    __forceinline T Length() const noexcept
+    { return sqrt(Dot(*this, *this)); }
+
+    __forceinline T LengthSq() const noexcept
+    { return Dot(*this, *this); }
 
     __forceinline static T Dot(const Vector3<T>& lhs, const Vector3<T>& rhs) noexcept
     { return lhs.x*rhs.x + lhs.y*rhs.y + lhs.z*rhs.z; }
@@ -367,7 +396,13 @@ struct Vector4
     __forceinline const T& operator[] (int index) const noexcept
     { return *(&x + index); }
 
-    __forceinline static T Dot(const Vector3<T>& lhs, const Vector3<T>& rhs) noexcept
+    __forceinline T Length() const noexcept
+    { return sqrt(Dot(*this, *this)); }
+
+    __forceinline T LengthSq() const noexcept
+    { return Dot(*this, *this); }
+
+    __forceinline static T Dot(const Vector4<T>& lhs, const Vector4<T>& rhs) noexcept
     { return lhs.x*rhs.x + lhs.y*rhs.y + lhs.z*rhs.z + lhs.w*rhs.w; }
 
     __forceinline static T Length(const Vector4<T>& value) noexcept
