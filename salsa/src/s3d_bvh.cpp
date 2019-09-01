@@ -8,11 +8,9 @@
 // Includes
 //-----------------------------------------------------------------------------
 #include <s3d_bvh.h>
-#include <chrono>
 #include <execution>
-#include <cassert>
 #include <ppl.h>
-#include <iostream>
+
 
 
 //-----------------------------------------------------------------------------
@@ -42,10 +40,11 @@ namespace s3d {
 //-----------------------------------------------------------------------------
 void LBVH::Build()
 {
-    AABB box(nullptr);
+    AABB box;
+    box.Clear();
 
     // 全体のバウンディングボックスを求める.
-    for(auto i=0; i<PositionCount; ++i)
+    for(size_t i=0; i<PositionCount; ++i)
     { box.Merge(Positions[i]); }
 
     // ポリゴン数.
