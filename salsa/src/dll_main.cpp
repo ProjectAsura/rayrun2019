@@ -71,7 +71,7 @@ void intersect
     bool    /*hitAny*/      // 交差が1つ以上あることが確定した段階で戻るか?
 )
 {
-    // ここはparallel_for化してもそんなに早くならなかった.
+    // ここはparallel_for化してもそんなに早くならなかった(むしろ，ちょっと遅くなる).
     for(size_t i=0; i<rayCount; ++i)
     {
         // 無効なレイは処理しない.
@@ -93,7 +93,7 @@ void intersect
         ray.inv_dir.x = 1.0f / ray.dir.x;
         ray.inv_dir.y = 1.0f / ray.dir.y;
         ray.inv_dir.z = 1.0f / ray.dir.z;
-            
+
         ray.tmin = rays[i].tnear;
         ray.tmax = rays[i].tfar;
 

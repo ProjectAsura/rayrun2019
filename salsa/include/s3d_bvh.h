@@ -83,14 +83,20 @@ struct LBVH
     __forceinline void IsHit(const Ray& ray, HitRecord& record, uint32_t face_id) const noexcept
     {
         const auto  id = face_id * 3;
-        const auto& p0 = Positions[Indices[id + 0].P];
-        const auto& p1 = Positions[Indices[id + 1].P];
-        const auto& p2 = Positions[Indices[id + 2].P];
         if (s3d::IntersectTriangle(
-            ray.pos, ray.dir, p0, p1, p2, ray.tmin, ray.tmax, record.dist, record.u, record.v))
+            ray.pos,
+            ray.dir,
+            Positions[Indices[id + 0].P],
+            Positions[Indices[id + 1].P],
+            Positions[Indices[id + 2].P],
+            ray.tmin,
+            ray.tmax,
+            record.dist,
+            record.u,
+            record.v))
         {
             record.face_id = int32_t(face_id);
-            record.hit = true;
+            record.hit     = true;
         }
     }
 

@@ -69,7 +69,7 @@ __forceinline uint32_t Morton3D(float x, float y, float z) noexcept
     uint32_t xx = ExpandBits((uint32_t)x);
     uint32_t yy = ExpandBits((uint32_t)y);
     uint32_t zz = ExpandBits((uint32_t)z);
-    return xx * 4 + yy * 2 + zz;
+    return (xx << 2) + (yy << 1) + zz;
 }
 
 __forceinline uint64_t Morton3D_64(float x, float y, float z) noexcept
@@ -80,7 +80,7 @@ __forceinline uint64_t Morton3D_64(float x, float y, float z) noexcept
     uint64_t xx = ExpandBits((uint64_t)dx);
     uint64_t yy = ExpandBits((uint64_t)dy);
     uint64_t zz = ExpandBits((uint64_t)dz);
-    return xx * 4 + yy * 2 + zz;
+    return (xx << 2) + (yy << 1) + zz;
 }
 
 // count leading zero
@@ -111,8 +111,7 @@ struct Vector2
     T x;
     T y;
  
-    __forceinline Vector2() noexcept
-    { /* DO_NOTHING */ }
+    Vector2() noexcept = default;
 
     __forceinline explicit Vector2(T nx, T ny) noexcept
     : x(nx), y(ny)
@@ -206,8 +205,7 @@ struct Vector3
     T y;
     T z;
  
-    __forceinline Vector3() noexcept
-    { /* DO_NOTHING */ }
+    Vector3() noexcept = default;
 
     __forceinline explicit Vector3(T nx, T ny, T nz) noexcept
     : x(nx), y(ny), z(nz)
@@ -308,19 +306,19 @@ struct Vector3
 };
 
 template<typename T>
-__forceinline T Max2(const Vector2<T>& value)
+__forceinline T Max2(const Vector2<T>& value) noexcept
 { return s3d::Max(value.x, value.y); }
 
 template<typename T>
-__forceinline T Min2(const Vector2<T>& value)
+__forceinline T Min2(const Vector2<T>& value) noexcept
 { return s3d::Min(value.x, value.y); }
 
 template<typename T>
-__forceinline T Max3(const Vector3<T>& value)
+__forceinline T Max3(const Vector3<T>& value) noexcept
 { return s3d::Max( s3d::Max(value.x, value.y), value.z ); }
 
 template<typename T>
-__forceinline T Min3(const Vector3<T>& value)
+__forceinline T Min3(const Vector3<T>& value) noexcept
 { return s3d::Min( s3d::Min(value.x, value.y), value.z ); }
 
 using Vector2i  = Vector2<int>;
@@ -346,8 +344,7 @@ struct AABB
     Vector3f mini;
     Vector3f maxi;
 
-    __forceinline AABB() noexcept
-    { /* DO_NOTHING */ }
+    AABB() noexcept = default;
 
     __forceinline explicit AABB(std::nullptr_t) noexcept
     : mini(kMaxBound, kMaxBound, kMaxBound)
@@ -467,8 +464,8 @@ __forceinline bool IntersectTriangle
     float&          v
 )
 {
-    auto e1  = v1 - v0;
-    auto e2  = v2 - v0;
+    const auto e1  = v1 - v0;
+    const auto e2  = v2 - v0;
     auto P   = Vector3f::Cross(rayDir, e2);
     auto det = Vector3f::Dot(e1, P);
     if (det == 0.0f)
